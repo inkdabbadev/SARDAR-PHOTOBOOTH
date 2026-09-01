@@ -1,0 +1,765 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no">
+<meta name="theme-color" content="#0d0e0a">
+
+<!-- "Add to Home Screen" -> standalone fullscreen, same as the iPad trigger -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SARDAR CALL">
+<link rel="apple-touch-icon" sizes="180x180" href="static/icon-180.png">
+<link rel="apple-touch-icon" sizes="167x167" href="static/icon-167.png">
+<link rel="apple-touch-icon" sizes="152x152" href="static/icon-152.png">
+<link rel="apple-touch-icon" sizes="120x120" href="static/icon-120.png">
+<link rel="icon" href="static/icon-32.png">
+
+<title>SARDAR :: Secure Line</title>
+<style>
+/* ==========================================================================
+   SARDAR :: the handset
+
+   A second phone-shaped screen that sits beside the booth. When a thumb is
+   verified at the iPad the booth enters INCOMING_CALL and this handset rings.
+   The booth WAITS on this screen: the mission briefing does not start until
+   somebody swipes to answer here (or the ring times out). Everything after
+   that -- briefing, countdown, capture, WhatsApp delivery -- still happens on
+   the booth.
+
+   Served by the same Flask app as the iPad page, so /status, /answer and
+   /fonts are all same-origin and there is no IP to configure. Same three-font
+   system as the booth display and the WhatsApp portrait card.
+   ========================================================================== */
+@font-face{ font-family:'Black Ops One'; src:url('fonts/BlackOpsOne-Regular.ttf') format('truetype'); font-weight:400; font-display:swap; }
+@font-face{ font-family:'JetBrains Mono'; src:url('fonts/JetBrainsMono-Regular.ttf') format('truetype'); font-weight:400; font-display:swap; }
+@font-face{ font-family:'JetBrains Mono'; src:url('fonts/JetBrainsMono-Medium.ttf') format('truetype'); font-weight:500; font-display:swap; }
+@font-face{ font-family:'JetBrains Mono'; src:url('fonts/JetBrainsMono-Bold.ttf') format('truetype'); font-weight:700; font-display:swap; }
+@font-face{ font-family:'Special Elite'; src:url('fonts/SpecialElite-Regular.ttf') format('truetype'); font-weight:400; font-display:swap; }
+
+:root{
+  --ink:#0d0e0a; --olive:#2a2c20; --amber:#c98a3a; --red:#e2381f; --green:#4c7a3c;
+  --text-bright:#f1ecd9; --text-dim:#9c9a86;
+  --font-head:'Black Ops One','Arial Narrow',sans-serif;
+  --font-mono:'JetBrains Mono','Courier New',monospace;
+  --font-type:'Special Elite','Courier New',monospace;
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-l:env(safe-area-inset-left,0px); --safe-r:env(safe-area-inset-right,0px);
+}
+*{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;
+   user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+html,body{ width:100%; height:100%; overflow:hidden; background:var(--ink);
+  position:fixed; inset:0; overscroll-behavior:none; touch-action:none; }
+body{
+  font-family:var(--font-mono); color:var(--text-bright);
+  background:radial-gradient(ellipse at 50% 28%, #23241a 0%, #131409 62%, #070703 100%);
+}
+
+/* ---- status rail ---- */
+#statusbar{
+  position:absolute; top:var(--safe-t); left:var(--safe-l); right:var(--safe-r); z-index:40;
+  display:flex; justify-content:space-between;
+  padding:16px 22px; font-size:13px; letter-spacing:0; color:var(--text-dim);
+}
+#statusbar .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px;
+  background:var(--red); vertical-align:middle; }
+#statusbar.online .dot{ background:var(--green); }
+#statusbar.offline .dot{ animation:blink 1s steps(1) infinite; }
+@keyframes blink{ 50%{ opacity:.2; } }
+
+/* ---- WhatsApp delivery ---- */
+.delivery{
+  display:none; position:absolute; left:calc(var(--safe-l) + 18px);
+  right:calc(var(--safe-r) + 18px); bottom:calc(var(--safe-b) + 22px); z-index:55;
+  padding:18px; border:1px solid rgba(201,138,58,.55); border-radius:8px;
+  background:rgba(12,14,9,.94); box-shadow:0 18px 44px rgba(0,0,0,.58);
+}
+.delivery.on{ display:block; }
+.delivery.saved{ border-color:rgba(76,122,60,.85); }
+.delivery label{
+  display:block; margin-bottom:12px; font-size:16px; line-height:1.25;
+  letter-spacing:0; color:var(--amber); font-weight:700;
+}
+.delivery .row{ display:flex; gap:10px; }
+.delivery input{
+  flex:1; min-width:0; height:54px; border:1px solid rgba(241,236,217,.28);
+  background:#080904; color:var(--text-bright); padding:0 14px;
+  font:700 22px var(--font-mono); letter-spacing:0; border-radius:6px;
+  user-select:text; -webkit-user-select:text;
+}
+.delivery input:focus{ outline:1px solid var(--amber); }
+.delivery button{
+  width:110px; height:54px; border:0; border-radius:6px; background:var(--green); color:#fff;
+  font:700 16px var(--font-mono); letter-spacing:0;
+}
+.delivery .msg{ margin-top:11px; min-height:20px; font-size:14px; line-height:1.45; letter-spacing:0; color:var(--text-dim); }
+.delivery.saved input,.delivery.saved button{ display:none; }
+.delivery.saved label{ margin-bottom:0; color:var(--green); }
+
+/* ---- scenes ---- */
+.scene{
+  position:absolute; inset:0; display:none;
+  flex-direction:column; align-items:center; justify-content:space-between; text-align:center;
+  padding:calc(var(--safe-t) + 70px) calc(var(--safe-r) + 24px) calc(var(--safe-b) + 34px) calc(var(--safe-l) + 24px);
+}
+.scene.on{ display:flex; }
+
+/* ---- standby ---- */
+.glyph{ width:88px; height:88px; opacity:.28; margin-bottom:20px; }
+.standby h2{ font-family:var(--font-head); font-size:34px; letter-spacing:0; margin-bottom:12px; }
+.standby p{ font-size:16px; line-height:1.65; color:var(--text-dim); }
+
+/* ---- caller ---- */
+.caller{ display:flex; flex-direction:column; align-items:center; gap:10px; }
+.tag{ font-size:15px; letter-spacing:0; color:var(--red); font-weight:700; }
+.avatar{
+  position:relative; width:min(184px,44vw); aspect-ratio:1; border-radius:50%;
+  background:linear-gradient(160deg,#33352a,#111208); border:3px solid rgba(241,236,217,.16);
+  display:grid; place-items:center; box-shadow:0 20px 60px rgba(0,0,0,.75); margin:6px 0 4px;
+}
+.avatar svg{ width:52%; height:52%; opacity:.85; }
+.avatar::before,.avatar::after{
+  content:''; position:absolute; inset:-12px; border-radius:50%;
+  border:2px solid rgba(226,56,31,.55); animation:pulse 1.9s ease-out infinite;
+}
+.avatar::after{ animation-delay:.95s; }
+@keyframes pulse{ 0%{ transform:scale(1); opacity:.85; } 100%{ transform:scale(1.6); opacity:0; } }
+.ringing .avatar{ animation:shake 1s ease-in-out infinite; }
+@keyframes shake{ 0%,100%{ transform:rotate(0); } 20%{ transform:rotate(-4deg); } 40%{ transform:rotate(4deg); } 60%{ transform:rotate(-2deg); } }
+
+.who{ font-family:var(--font-head); font-size:52px; letter-spacing:0; line-height:1.05; }
+.from{ font-size:15px; letter-spacing:0; color:var(--text-dim); line-height:1.45; }
+.num{ font-size:22px; font-weight:700; letter-spacing:0; }
+
+/* ---- swipe to answer ---- */
+.swipe{
+  position:relative; width:min(420px,86vw); height:76px; border-radius:38px;
+  background:#15160e; border:1px solid #000;
+  box-shadow:inset 0 3px 10px rgba(0,0,0,.85), 0 2px 0 rgba(255,255,255,.04);
+  overflow:hidden; touch-action:none;
+}
+.swipe .fill{
+  position:absolute; inset:0; width:0;
+  background:linear-gradient(90deg,rgba(76,122,60,.15),rgba(76,122,60,.5));
+}
+.swipe .label{
+  position:absolute; inset:0; display:grid; place-items:center; padding-left:52px;
+  font-size:15px; letter-spacing:0; color:var(--text-dim); pointer-events:none;
+}
+.swipe .label span{ animation:slide 1.9s ease-in-out infinite; }
+@keyframes slide{ 0%,100%{ opacity:.45; transform:translateX(0); } 50%{ opacity:1; transform:translateX(9px); } }
+.knob{
+  position:absolute; top:5px; left:5px; width:66px; height:66px; border-radius:50%;
+  background:linear-gradient(160deg,#5fbe48,#2c7521);
+  display:grid; place-items:center; box-shadow:0 6px 16px rgba(0,0,0,.7);
+  touch-action:none; cursor:grab;
+}
+.knob:active{ cursor:grabbing; }
+.knob svg{ width:44%; height:44%; fill:#fff; }
+.armed .knob{ box-shadow:0 0 0 4px rgba(95,190,72,.35), 0 6px 16px rgba(0,0,0,.7); }
+
+/* ---- in call ---- */
+.wave{ display:flex; gap:5px; height:58px; align-items:center; justify-content:center; }
+.wave i{ width:5px; border-radius:3px; height:10px; background:var(--amber); animation:bars .9s ease-in-out infinite; }
+.wave i:nth-child(2){animation-delay:.08s}.wave i:nth-child(3){animation-delay:.16s}
+.wave i:nth-child(4){animation-delay:.24s}.wave i:nth-child(5){animation-delay:.32s}
+.wave i:nth-child(6){animation-delay:.40s}.wave i:nth-child(7){animation-delay:.48s}
+.wave i:nth-child(8){animation-delay:.56s}.wave i:nth-child(9){animation-delay:.64s}
+@keyframes bars{ 0%,100%{ height:10px; } 50%{ height:52px; } }
+.transcript{
+  font-family:var(--font-type); font-size:18px; line-height:1.65;
+  max-width:560px; margin:18px auto 0; min-height:6em; color:var(--text-bright);
+}
+.timer{ font-size:16px; letter-spacing:0; color:var(--text-dim); }
+.live{ font-size:15px; letter-spacing:0; color:var(--green); font-weight:700; }
+
+/* ---- ended ---- */
+.stampbox{
+  display:inline-block; margin-top:20px; border:3px solid var(--red); color:var(--red);
+  font-family:var(--font-head); letter-spacing:0; font-size:17px;
+  padding:7px 16px; transform:rotate(-6deg); opacity:.9;
+}
+
+.tapnote{
+  position:absolute; left:0; right:0; bottom:calc(var(--safe-b) + 12px); z-index:30;
+  text-align:center; font-size:14px; letter-spacing:0; color:var(--red);
+}
+.ringcue{
+  font-size:16px; letter-spacing:0; color:var(--amber);
+  animation:blink 1.2s steps(1) infinite;
+}
+.ringcue.armed{ display:none; }
+
+/* Phones refuse to make a sound until the page has been touched, and a silent
+   handset is the one failure nobody notices until a guest is standing there.
+   So the screen is unusable until it has been tapped once, on purpose. */
+#gate{
+  position:absolute; inset:0; z-index:90; display:flex;
+  flex-direction:column; align-items:center; justify-content:center; gap:18px;
+  background:radial-gradient(ellipse at 50% 40%, #23241a 0%, #0b0c06 70%);
+  text-align:center; padding:30px;
+}
+#gate.done{ display:none; }
+#gate .ring1{
+  width:120px; height:120px; border-radius:50%; border:3px solid var(--amber);
+  display:grid; place-items:center; animation:gatepulse 1.7s ease-in-out infinite;
+}
+#gate .ring1 svg{ width:52%; height:52%; }
+@keyframes gatepulse{ 0%,100%{ transform:scale(1); opacity:.8; } 50%{ transform:scale(1.09); opacity:1; } }
+#gate h2{ font-family:var(--font-head); font-size:34px; letter-spacing:0; }
+#gate p{ font-size:16px; line-height:1.6; color:var(--text-dim); max-width:330px; }
+
+@media (max-width:380px), (max-height:680px){
+  .scene{ padding-top:calc(var(--safe-t) + 58px); padding-bottom:calc(var(--safe-b) + 24px); }
+  .who{ font-size:44px; }
+  .standby h2,#gate h2{ font-size:30px; }
+  .avatar{ width:150px; }
+  .delivery{ left:calc(var(--safe-l) + 12px); right:calc(var(--safe-r) + 12px); bottom:calc(var(--safe-b) + 14px); padding:14px; }
+  .delivery input{ font-size:19px; height:50px; }
+  .delivery button{ width:96px; height:50px; font-size:15px; }
+}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="ring1">
+    <svg viewBox="0 0 64 64" fill="none" stroke="#c98a3a" stroke-width="2.5" stroke-linecap="round">
+      <path d="M14 10h10l5 12-7 4c2 7 8 13 15 15l4-7 12 5v10c0 2-2 4-4 4C29 53 11 35 11 14c0-2 2-4 3-4z"/>
+    </svg>
+  </div>
+  <h2>Tap to Start</h2>
+  <p>Keep this page open during the booth experience.</p>
+</div>
+
+<div id="statusbar" class="offline">
+  <span><span class="dot"></span><span id="linktxt">Connecting</span></span>
+  <span id="clock">--:--:--</span>
+</div>
+
+<form class="delivery" id="delivery">
+  <label id="deliveryLabel">Send Portrait</label>
+  <div class="row">
+    <input id="phoneInput" type="tel" inputmode="tel" autocomplete="tel" placeholder="8015343212">
+    <button type="submit">Send</button>
+  </div>
+  <div class="msg" id="deliveryMsg">Enter a 10-digit WhatsApp number.</div>
+</form>
+
+<!-- ============================ STANDBY ============================ -->
+<div class="scene on standby" id="s-idle">
+  <span></span>
+  <div>
+    <svg class="glyph" viewBox="0 0 64 64" fill="none" stroke="#f1ecd9" stroke-width="2.5" stroke-linecap="round">
+      <path d="M14 10h10l5 12-7 4c2 7 8 13 15 15l4-7 12 5v10c0 2-2 4-4 4C29 53 11 35 11 14c0-2 2-4 3-4z"/>
+    </svg>
+    <h2>Ready</h2>
+    <p>Keep this phone nearby.</p>
+  </div>
+  <span></span>
+  <div class="tapnote" id="tapnote">Tap once to enable sound</div>
+</div>
+
+<!-- ============================ RINGING ============================ -->
+<div class="scene ringing" id="s-ring">
+  <div class="caller">
+    <div class="tag" style="animation:blink 1.1s steps(1) infinite">Incoming Call</div>
+    <div class="avatar">
+      <svg viewBox="0 0 64 64" fill="none" stroke="#f1ecd9" stroke-width="2.5">
+        <circle cx="32" cy="24" r="12"/>
+        <path d="M10 56c2-12 11-18 22-18s20 6 22 18"/>
+      </svg>
+    </div>
+    <div class="who" id="callerName">SARDAR</div>
+    <div class="from" id="callerOrg">Sardar Command</div>
+    <div class="num">Secure Line</div>
+  </div>
+
+  <div class="ringcue armed" id="ringcue">Ringing</div>
+
+  <div class="swipe" id="swipe">
+    <div class="fill" id="swipeFill"></div>
+    <div class="label"><span>Swipe to answer</span></div>
+    <div class="knob" id="knob">
+      <svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.9 15.9 0 006.6 6.6l2.2-2.2a1 1 0 011-.24 11.4 11.4 0 003.6.58 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.46.58 3.6a1 1 0 01-.25 1z"/></svg>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ ON CALL ============================ -->
+<div class="scene" id="s-call">
+  <div class="caller">
+    <div class="live">Connected</div>
+    <div class="who" id="callerName2">SARDAR</div>
+    <div class="timer" id="timer">00:00</div>
+  </div>
+  <div>
+    <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="transcript" id="transcript"></div>
+  </div>
+  <div class="from">Listen carefully</div>
+</div>
+
+<!-- ============================ ENDED ============================ -->
+<div class="scene" id="s-done">
+  <span></span>
+  <div>
+    <div class="who">Look at<br>the booth</div>
+    <p style="font-size:17px;line-height:1.5;color:var(--text-dim);margin-top:16px">
+      Your portrait will be captured there.
+    </p>
+    <div class="stampbox">Ready</div>
+  </div>
+  <span></span>
+</div>
+
+<!-- Drop a ringtone.mp3 beside sardar_photobooth.py and it replaces the synth ring -->
+<audio id="ringfile" src="ringtone.mp3" preload="auto" autoplay playsinline loop></audio>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  // this phone belongs to one booth session, named by the token in the QR URL
+  function resolveAppBase() {
+    var path = location.pathname.replace(/\/+$/, '');
+    ['/phone', '/scanner', '/scan', '/tablet'].forEach(function (suffix) {
+      if (path.endsWith(suffix)) path = path.slice(0, -suffix.length);
+    });
+    return path === '/' ? '' : path;
+  }
+
+  var APP_BASE = resolveAppBase();
+  var api = function (path) { return APP_BASE + path; };
+  var TOKEN = new URLSearchParams(location.search).get('token') || '';
+  var q = function (base) { return api(base) + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : ''); };
+  var scenes = { IDLE: $('s-idle'), RINGING: $('s-ring'), ON_CALL: $('s-call'), DONE: $('s-done') };
+  var shown = null;
+  var deliverySaved = false;
+  function show(name) {
+    var target = scenes[name] || scenes.IDLE;
+    if (target === shown) return;               // don't restart animations every poll
+    for (var k in scenes) scenes[k].classList.remove('on');
+    target.classList.add('on');
+    shown = target;
+  }
+
+  function setDeliveryState(saved, label, msg) {
+    var box = $('delivery');
+    if (!box) return;
+    box.classList.add('on');
+    deliverySaved = !!saved;
+    box.classList.toggle('saved', deliverySaved);
+    $('deliveryLabel').textContent = label || 'Send Portrait';
+    $('deliveryMsg').textContent = msg || '';
+  }
+
+  function hideDeliveryState() {
+    var box = $('delivery');
+    if (!box) return;
+    deliverySaved = false;
+    box.classList.remove('on', 'saved');
+    $('deliveryLabel').textContent = 'Send Portrait';
+    $('deliveryMsg').textContent = 'Enter a 10-digit WhatsApp number.';
+  }
+
+  async function submitDelivery(e) {
+    if (e) e.preventDefault();
+    var input = $('phoneInput');
+    var phone = input ? input.value : '';
+    if (!TOKEN) {
+      setDeliveryState(false, 'Send Portrait', 'Scan the booth QR again.');
+      return;
+    }
+    setDeliveryState(false, 'Send Portrait', 'Checking number...');
+    try {
+      var res = await fetchWithTimeout(q('/delivery-number'), {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phone })
+      }, 5000);
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        if (data.reason === 'portrait_not_ready') {
+          setDeliveryState(false, 'Portrait Not Ready', 'Wait for the captured portrait preview.');
+          return;
+        }
+        setDeliveryState(false, 'Send Portrait', 'Enter a valid WhatsApp number.');
+        return;
+      }
+      if (data.send_state === 'waiting_for_card') {
+        setDeliveryState(true, 'Number Saved', 'Creating portrait for ' + (data.masked || 'this number') + '.');
+      } else {
+        setDeliveryState(true, 'Sending Portrait', 'Sending to ' + (data.masked || 'this number') + '...');
+      }
+    } catch (err) {
+      setDeliveryState(false, 'Send Portrait', 'Connection error. Try again.');
+    }
+  }
+
+  var deliveryForm = $('delivery');
+  if (deliveryForm) deliveryForm.addEventListener('submit', submitDelivery);
+
+  // ---- clock -------------------------------------------------------------
+  function pad(n) { return String(n).padStart(2, '0'); }
+  setInterval(function () {
+    var d = new Date();
+    $('clock').textContent = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }, 1000);
+
+  // ---- keep the handset awake -------------------------------------------
+  var wakeLock = null;
+  async function requestWakeLock() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }
+    catch (e) { /* denied or unsupported â€” not fatal */ }
+  }
+  requestWakeLock();
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') requestWakeLock();
+  });
+
+  // ---- sound -------------------------------------------------------------
+  // Start audio automatically whenever the handset rings. Some mobile browsers
+  // enforce a system-level user-gesture rule; the touch fallback below is only
+  // for those browsers and is not shown as part of the call UI.
+  var ctx = null, audioReady = false, haveMp3 = false;
+  function actx() { return (ctx = ctx || new (window.AudioContext || window.webkitAudioContext)()); }
+
+  // iOS in particular suspends the context whenever the screen sleeps, so this
+  // is called again on every ring rather than only once at unlock time.
+  function wake() {
+    try { var c = actx(); if (c.state !== 'running') c.resume(); return c; }
+    catch (e) { return null; }
+  }
+
+  function beep(freq, dur, type, gain) {
+    var c = wake();
+    if (!c) return;
+    try {
+      var o = c.createOscillator(), g = c.createGain(), t = c.currentTime;
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(gain == null ? 0.22 : gain, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(c.destination);
+      o.start(t); o.stop(t + dur + 0.03);
+    } catch (e) {}
+  }
+
+  function unlock() {
+    wake();
+    // a one-sample silent blip: on iOS this is what actually promotes the
+    // context out of its "needs a gesture" state
+    try {
+      var c = actx(), b = c.createBuffer(1, 1, 22050), src = c.createBufferSource();
+      src.buffer = b; src.connect(c.destination); src.start(0);
+    } catch (e) {}
+    var f = $('ringfile');
+    if (f && haveMp3) { f.play().then(function () { f.pause(); f.currentTime = 0; }).catch(function () {}); }
+    audioReady = true;
+    var g = $('gate');
+    if (g) g.classList.add('done');
+    beep(880, 0.12, 'sine', 0.18);   // audible proof the ringer works
+    if (phase === 'RINGING') startRing();   // make the already-showing ring audible
+    var cue = $('ringcue'); if (cue) cue.classList.add('armed');
+    var n = $('tapnote');
+    if (n) { n.textContent = 'Sound enabled'; n.style.color = 'var(--green)'; }
+  }
+  // No separate "arm" screen: scanning the QR drops the guest straight into
+  // the ringing call. The first touch anywhere still unlocks audio (phones
+  // block sound until a gesture), and if we're already ringing we restart the
+  // ring so it becomes audible the instant they touch the screen.
+  (function () { var g = $('gate'); if (g) g.classList.add('done'); })();
+  window.addEventListener('pointerdown', function () { if (!audioReady) unlock(); }, { passive: true });
+
+  // only reach for the mp3 if one was actually dropped in beside the script
+  fetch(api('/ringtone.mp3'), { method: 'GET', cache: 'no-store' })
+    .then(function (r) {
+      haveMp3 = r.ok;
+      // The status poll may have reached RINGING before the file check ended.
+      if (haveMp3 && phase === 'RINGING') startRing();
+    })
+    .catch(function () { haveMp3 = false; });
+
+  // ---- ringtone ----------------------------------------------------------
+  var ringTimer = null, vibTimer = null, burstTimer = null, usingFile = false;
+  function startRing() {
+    stopRing();
+    wake();
+    var f = $('ringfile');
+    if (haveMp3 && f) {
+      var p = f.play();
+      if (p && p.then) p.then(function () { usingFile = true; }).catch(function () { usingFile = false; synthRing(); });
+      else synthRing();
+    } else {
+      synthRing();
+    }
+    if (navigator.vibrate) {
+      navigator.vibrate([420, 200, 420, 1500]);
+      vibTimer = setInterval(function () { navigator.vibrate([420, 200, 420, 1500]); }, 2600);
+    }
+  }
+  // a two-tone trill, loud enough to hear across a noisy room
+  function synthRing() {
+    var burst = function () {
+      wake();
+      var i = 0;
+      clearInterval(burstTimer);
+      burstTimer = setInterval(function () {
+        beep(i % 2 ? 520 : 700, 0.19, 'triangle', 0.30);
+        beep(i % 2 ? 1040 : 1400, 0.19, 'sine', 0.10);   // an octave up, for cut
+        if (++i >= 8) clearInterval(burstTimer);
+      }, 190);
+    };
+    burst();
+    ringTimer = setInterval(burst, 2600);
+  }
+  function stopRing() {
+    if (ringTimer) { clearInterval(ringTimer); ringTimer = null; }
+    // also kill the burst already in flight, so a swipe silences the phone
+    // that instant rather than letting the current trill play out
+    if (burstTimer) { clearInterval(burstTimer); burstTimer = null; }
+    if (vibTimer) { clearInterval(vibTimer); vibTimer = null; }
+    var f = $('ringfile');
+    if (f && usingFile) { try { f.pause(); f.currentTime = 0; } catch (e) {} }
+    usingFile = false;
+    if (navigator.vibrate) navigator.vibrate(0);
+  }
+
+  // ---- swipe to answer ---------------------------------------------------
+  // A deliberate gesture, so a handset knocked on a table can't answer itself.
+  var swipe = $('swipe'), knob = $('knob'), fill = $('swipeFill');
+  var dragging = false, startX = 0, travel = 0, answering = false;
+  var THRESHOLD = 0.72;
+
+  function maxTravel() { return swipe.clientWidth - knob.offsetWidth - 10; }
+
+  function setTravel(px) {
+    var max = maxTravel();
+    travel = Math.max(0, Math.min(max, px));
+    knob.style.left = (5 + travel) + 'px';
+    fill.style.width = (travel + knob.offsetWidth) + 'px';
+    swipe.classList.toggle('armed', max > 0 && travel / max >= THRESHOLD);
+  }
+  function release() {
+    if (!dragging) return;
+    dragging = false;
+    var max = maxTravel();
+    if (max > 0 && travel / max >= THRESHOLD) answer();
+    else { knob.style.transition = 'left .18s'; fill.style.transition = 'width .18s'; setTravel(0);
+           setTimeout(function () { knob.style.transition = fill.style.transition = ''; }, 200); }
+  }
+  knob.addEventListener('pointerdown', function (e) {
+    if (answering) return;
+    unlock();
+    dragging = true; startX = e.clientX - travel;
+    knob.setPointerCapture && knob.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    setTravel(e.clientX - startX);
+    e.preventDefault();
+  }, { passive: false });
+  window.addEventListener('pointerup', release);
+  window.addEventListener('pointercancel', release);
+  // spacebar answers too, for testing without a touchscreen
+  window.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' && shown === scenes.RINGING) { e.preventDefault(); unlock(); answer(); }
+  });
+
+  function resetSwipe() {
+    answering = false;
+    swipe.classList.remove('armed');
+    knob.style.transition = fill.style.transition = '';
+    setTravel(0);
+  }
+
+  async function answer() {
+    if (answering) return;
+    answering = true;
+    stopRing();
+    beep(1100, 0.22, 'sine', 0.12);
+    // Start the briefing in the answer gesture itself. This avoids mobile
+    // browsers treating the later status-poll callback as an untrusted audio
+    // request, so no second tap is needed after answering the call.
+    playBriefing();
+    try {
+      await fetch(q('/answer'), {
+        method: 'POST', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+    } catch (e) {
+      // the booth will fall back to its own ring timeout, so don't strand the guest
+      answering = false;
+    }
+  }
+
+  // ---- the briefing plays HERE, on the phone --------------------------------
+  var MISSION = '';
+  var typeTimer = null;
+  var audioDoneSent = false, spoke = false;
+
+  function reportAudioDone() {
+    if (audioDoneSent) return;
+    audioDoneSent = true;
+    fetch(q('/audio-done'), { method: 'POST', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(function () {});
+  }
+
+  function playBriefing() {
+    if (spoke) return;
+    spoke = true;
+    typeOut(MISSION);
+    var f = $('ringfile');   // reused element; if you drop a briefing.mp3, prefer it below
+    // Prefer the browser's own voice so no audio file is required.
+    var spokeVia = false;
+    try {
+      if (window.speechSynthesis && MISSION) {
+        var u = new SpeechSynthesisUtterance(MISSION);
+        u.rate = 0.96; u.pitch = 0.9; u.volume = 1;
+        var pick = function () {
+          var vs = speechSynthesis.getVoices();
+          var v = vs.filter(function (x) { return /en-IN|India/i.test(x.lang + x.name); })[0]
+               || vs.filter(function (x) { return /en-GB/i.test(x.lang); })[0];
+          if (v) u.voice = v;
+        };
+        pick(); if (speechSynthesis.getVoices().length === 0) speechSynthesis.onvoiceschanged = pick;
+        u.onend = reportAudioDone;
+        u.onerror = reportAudioDone;
+        speechSynthesis.cancel();
+        speechSynthesis.speak(u);
+        spokeVia = true;
+        // safety net: some mobile browsers never fire onend
+        setTimeout(reportAudioDone, Math.max(9000, MISSION.length * 90 + 4000));
+      }
+    } catch (e) { spokeVia = false; }
+    if (!spokeVia) setTimeout(reportAudioDone, 9000);
+  }
+
+  function typeOut(text) {
+    clearInterval(typeTimer);
+    var t = $('transcript'); t.textContent = '';
+    if (!text) return;
+    var i = 0;
+    typeTimer = setInterval(function () {
+      if (i > text.length) { clearInterval(typeTimer); return; }
+      t.textContent = text.slice(0, i++);
+    }, 45);
+  }
+
+  // ---- talk to the booth -------------------------------------------------
+  function fetchWithTimeout(url, opts, ms) {
+    var controller = new AbortController();
+    var t = setTimeout(function () { controller.abort(); }, ms);
+    return fetch(url, Object.assign({}, opts || {}, { signal: controller.signal }))
+      .finally(function () { clearTimeout(t); });
+  }
+
+  var callT0 = 0, tick = null, phase = null;
+
+  function onState(st) {
+    if (st === phase) return;
+    phase = st;
+
+    if (st === 'RINGING') {
+      resetSwipe();
+      var cue = $('ringcue'); if (cue) cue.classList.toggle('armed', audioReady);
+      show('RINGING');
+      // try to ring on open with no tap at all; browsers that block it fall
+      // back to ringing on the guest's first touch (see the window listener)
+      wake();
+      var f = $('ringfile');
+      if (f) { try { f.loop = true; f.currentTime = 0; } catch (e) {}
+        var pr = f.play();
+        if (pr && pr.catch) pr.then(function(){ usingFile = true; }).catch(function(){ startRing(); });
+        else startRing();
+      } else { startRing(); }
+    } else if (st === 'ON_CALL') {
+      stopRing();
+      show('ON_CALL');
+      callT0 = Date.now();
+      clearInterval(tick);
+      tick = setInterval(function () {
+        var d = Math.floor((Date.now() - callT0) / 1000);
+        $('timer').textContent = pad(Math.floor(d / 60)) + ':' + pad(d % 60);
+      }, 500);
+      playBriefing();
+    } else if (st === 'LOOK_AT_BOOTH') {
+      stopRing(); clearInterval(tick);
+      show('DONE');
+    } else if (st === 'IDLE') {
+      stopRing(); clearInterval(tick); clearInterval(typeTimer);
+      spoke = false; audioDoneSent = false;
+      hideDeliveryState();
+      var phoneInput = $('phoneInput'); if (phoneInput) phoneInput.value = '';
+      resetSwipe();
+      show('IDLE');
+    } else {
+      stopRing(); clearInterval(tick);
+      show('DONE');
+    }
+  }
+
+  var paired = false;
+  async function pairOnce() {
+    if (paired || !TOKEN) return;
+    try {
+      var r = await fetch(q('/pair'), { method: 'POST', cache: 'no-store' });
+      if (r.ok) { var d = await r.json(); if (d.paired) paired = true; }
+    } catch (e) {}
+  }
+
+  async function poll() {
+    var bar = $('statusbar');
+    try {
+      var res = await fetchWithTimeout(q('/status'), { cache: 'no-store' }, 3000);
+      var data = await res.json();
+      bar.className = 'online';
+      $('linktxt').textContent = 'Connected';
+      if (data.caller) { $('callerName').textContent = data.caller; $('callerName2').textContent = data.caller; }
+      if (data.mission && data.mission !== MISSION) MISSION = data.mission;
+      if (data.delivery_status === 'READY_FOR_NUMBER') {
+        setDeliveryState(false, 'Send Portrait',
+          'Enter a 10-digit WhatsApp number.');
+      } else if (data.delivery_status === 'NUMBER_READY') {
+        setDeliveryState(true, 'Number Saved',
+          'Preparing portrait for ' + (data.delivery_to || 'your WhatsApp') + '.');
+      } else if (data.delivery_status === 'SENDING') {
+        setDeliveryState(true, 'Sending Portrait',
+          'Sending to ' + (data.delivery_to || 'your WhatsApp') + '...');
+      } else if (data.delivery_status === 'SENT') {
+        setDeliveryState(true, 'Portrait Sent',
+          'Check WhatsApp on ' + (data.delivery_to || 'your phone') + '.');
+      } else if (data.delivery_status === 'ERROR') {
+        var deliveryError = data.delivery_error || 'Check the number or ask the operator, then try again.';
+        if (deliveryError.indexOf('GREEN_API_ID_INSTANCE') >= 0 || deliveryError.indexOf('GREEN_API_TOKEN_INSTANCE') >= 0) {
+          deliveryError = 'WhatsApp is not configured. Ask the operator.';
+        }
+        setDeliveryState(false, 'Send Failed',
+          deliveryError);
+      } else if (data.delivery_status === 'NO_NUMBER') {
+        setDeliveryState(true, 'Skipped',
+          'No WhatsApp number was entered for this portrait.');
+      }
+      // keep announcing ourselves until the booth acknowledges and starts ringing
+      if (!data.paired || data.state === 'SHOW_QR') pairOnce();
+      onState(data.phone_state || 'IDLE');
+    } catch (e) {
+      bar.className = 'offline';
+      $('linktxt').textContent = 'Reconnecting...';
+    }
+  }
+
+  pairOnce();
+  poll();
+  // fast enough that the handset rings the moment the thumb clears the scanner
+  setInterval(poll, 700);
+})();
+</script>
+</body>
+</html>

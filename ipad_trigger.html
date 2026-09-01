@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no">
+<meta name="theme-color" content="#0d0e0a">
+
+<!-- iOS "Add to Home Screen" -> standalone fullscreen (no Safari chrome) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SARDAR">
+<link rel="apple-touch-icon" sizes="180x180" href="static/icon-180.png">
+<link rel="apple-touch-icon" sizes="167x167" href="static/icon-167.png">
+<link rel="apple-touch-icon" sizes="152x152" href="static/icon-152.png">
+<link rel="apple-touch-icon" sizes="120x120" href="static/icon-120.png">
+<link rel="icon" href="static/icon-32.png">
+
+<title>SARDAR :: Identity Scanner</title>
+<style>
+/* ==========================================================================
+   SARDAR :: iPad fingerprint trigger
+   This is the ONLY screen the iPad shows. Its sole job: run the thumb-scan
+   animation, then POST /trigger to the booth PC (this page is served BY
+   that PC's Flask app, so the request is same-origin — no IP to configure).
+   Everything else (call, voice, capture, WhatsApp delivery) happens on the main
+   booth display, driven by sardar_photobooth.py.
+
+   Hardened for a bolted-down iPad kiosk: Add-to-Home-Screen standalone
+   mode (hides Safari's chrome entirely), safe-area padding for the
+   notch/home-indicator, no bounce/zoom/callout, and a screen wake lock
+   so the display never dims while it's just sitting there waiting for
+   the next agent. Fonts are self-hosted from /fonts (served by the same
+   Flask app) rather than pulled from Google Fonts, so the kiosk doesn't
+   depend on the booth network having internet access at all -- and it's
+   the same three-font system used on the booth display and WhatsApp portrait card:
+   Black Ops One for headline/stencil text, JetBrains Mono for terminal
+   readouts, Special Elite for typewriter/classified text.
+   ========================================================================== */
+@font-face{ font-family:'Black Ops One'; src:url('fonts/BlackOpsOne-Regular.ttf') format('truetype'); font-weight:400; font-display:swap; }
+@font-face{ font-family:'JetBrains Mono'; src:url('fonts/JetBrainsMono-Regular.ttf') format('truetype'); font-weight:400; font-display:swap; }
+@font-face{ font-family:'JetBrains Mono'; src:url('fonts/JetBrainsMono-Medium.ttf') format('truetype'); font-weight:500; font-display:swap; }
+@font-face{ font-family:'JetBrains Mono'; src:url('fonts/JetBrainsMono-Bold.ttf') format('truetype'); font-weight:700; font-display:swap; }
+@font-face{ font-family:'Special Elite'; src:url('fonts/SpecialElite-Regular.ttf') format('truetype'); font-weight:400; font-display:swap; }
+
+:root{
+  --ink:#0d0e0a; --amber:#c98a3a; --red:#e2381f; --green:#4c7a3c;
+  --text-bright:#f1ecd9; --text-dim:#9c9a86;
+  --font-head:'Black Ops One','Arial Narrow',sans-serif;
+  --font-mono:'JetBrains Mono','Courier New',monospace;
+  --font-type:'Special Elite','Courier New',monospace;
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-l:env(safe-area-inset-left,0px); --safe-r:env(safe-area-inset-right,0px);
+}
+*{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;
+   user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+html,body{ width:100%; height:100%; overflow:hidden; background:var(--ink);
+  position:fixed; inset:0; overscroll-behavior:none; touch-action:none; }
+body{
+  font-family:var(--font-mono); color:var(--text-bright);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background:radial-gradient(ellipse at 50% 30%, #2a2b20 0%, #14150f 65%, #080805 100%);
+  padding:calc(var(--safe-t) + 10px) calc(var(--safe-r) + 10px) calc(var(--safe-b) + 10px) calc(var(--safe-l) + 10px);
+}
+#statusbar{
+  position:absolute; top:var(--safe-t); left:var(--safe-l); right:var(--safe-r);
+  display:flex; justify-content:space-between;
+  padding:14px 22px; font-size:11px; letter-spacing:1px; color:var(--text-dim);
+}
+#statusbar .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+#statusbar .online .dot{ background:var(--green); }
+#statusbar .offline .dot{ background:var(--red); animation:blink 1s steps(1) infinite; }
+#statusbar .busy .dot{ background:var(--amber); animation:blink 1s steps(1) infinite; }
+@keyframes blink{ 50%{ opacity:.2; } }
+
+.logo-mark{ display:flex; flex-direction:column; align-items:center; gap:6px; margin-bottom:30px; }
+.logo-mark img{ width:min(50vw,320px); filter:drop-shadow(0 6px 14px rgba(0,0,0,.6)); }
+.logo-mark .tagline{
+  font-family:var(--font-head); letter-spacing:2px; font-size:13px;
+  color:#d8cfae; background:#1a1b14; padding:5px 14px; border:1px solid #000;
+}
+.eyebrow{ font-family:var(--font-mono); font-weight:500; letter-spacing:4px; font-size:11px; color:var(--text-dim); margin-bottom:8px; text-transform:uppercase; }
+
+.scan-frame{ position:relative; width:min(58vw,58vh,280px); height:min(58vw,58vh,280px);
+  display:flex; align-items:center; justify-content:center; cursor:pointer; touch-action:manipulation; }
+.scan-frame .corner{ position:absolute; width:32px; height:32px; }
+.scan-frame .corner.tl{ top:0; left:0; border-top:4px solid var(--amber); border-left:4px solid var(--amber); }
+.scan-frame .corner.tr{ top:0; right:0; border-top:4px solid var(--amber); border-right:4px solid var(--amber); }
+.scan-frame .corner.bl{ bottom:0; left:0; border-bottom:4px solid var(--amber); border-left:4px solid var(--amber); }
+.scan-frame .corner.br{ bottom:0; right:0; border-bottom:4px solid var(--amber); border-right:4px solid var(--amber); }
+.scan-frame .ring{ position:absolute; width:70%; height:70%; border-radius:50%; border:2px dashed rgba(201,138,58,.4); animation:spin 12s linear infinite; }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+.scan-frame .progress-ring{ position:absolute; inset:0; transform:rotate(-90deg); }
+.scan-frame .progress-ring circle{ fill:none; stroke-width:4; stroke:var(--red); stroke-dasharray:754; stroke-dashoffset:754; stroke-linecap:round; transition:stroke-dashoffset .1s linear; }
+.fingerprint{ width:42%; height:42%; }
+.fingerprint circle{ fill:none; stroke:var(--text-bright); stroke-width:3; opacity:.85; }
+.scan-frame.scanning .fingerprint circle{ stroke:var(--red); animation:fp-pulse 1.4s ease-in-out infinite; }
+@keyframes fp-pulse{ 0%,100%{ opacity:.35; } 50%{ opacity:1; } }
+.scan-frame.disabled{ pointer-events:none; opacity:.4; }
+
+.scan-status{ margin-top:26px; font-family:var(--font-head); font-size:15px; letter-spacing:1px; color:var(--text-dim); text-align:center; min-height:24px; }
+.scan-status.live{ color:var(--red); }
+.scan-status.ok{ color:var(--green); }
+.hint{ margin-top:14px; font-family:var(--font-mono); font-size:11px; color:var(--text-dim); letter-spacing:1px; text-align:center; }
+
+/* landscape iPad: keep the frame from crowding the header */
+@media (orientation: landscape){
+  .logo-mark{ margin-bottom:16px; }
+  .logo-mark img{ width:min(22vw,260px); }
+}
+
+#addhome{
+  position:absolute; left:50%; bottom:calc(var(--safe-b) + 18px); transform:translateX(-50%);
+  font-size:11px; letter-spacing:.5px; color:var(--text-dim);
+  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+  padding:8px 16px; border-radius:20px; text-align:center; max-width:80vw;
+}
+#addhome b{ color:var(--amber); }
+</style>
+</head>
+<body>
+
+<div id="statusbar">
+  <span id="conn" class="offline"><span class="dot"></span>CONNECTING...</span>
+  <span id="clock">00:00:00</span>
+</div>
+
+<div class="logo-mark">
+  <img src="sardar-logo.png" alt="SARDAR">
+  <div class="tagline">THE ONE SIDE</div>
+</div>
+<div class="eyebrow">Identity Scanner Terminal</div>
+
+<div class="scan-frame" id="scan-frame">
+  <div class="ring"></div>
+  <svg class="progress-ring" viewBox="0 0 260 260"><circle cx="130" cy="130" r="120"></circle></svg>
+  <svg class="fingerprint" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="10"/>
+    <circle cx="50" cy="50" r="18" stroke-dasharray="90 30" transform-origin="50 50" transform="rotate(20)"/>
+    <circle cx="50" cy="50" r="26" stroke-dasharray="120 40" transform-origin="50 50" transform="rotate(-35)"/>
+    <circle cx="50" cy="50" r="34" stroke-dasharray="150 55" transform-origin="50 50" transform="rotate(60)"/>
+    <circle cx="50" cy="50" r="42" stroke-dasharray="180 70" transform-origin="50 50" transform="rotate(-90)"/>
+  </svg>
+  <div class="corner tl"></div><div class="corner tr"></div>
+  <div class="corner bl"></div><div class="corner br"></div>
+</div>
+<div class="scan-status" id="scan-status">PLACE THUMB TO BEGIN IDENTITY SCAN</div>
+<div class="hint">CLEARANCE LEVEL: TOP SECRET</div>
+
+<div id="addhome" hidden>Tap <b>Share</b> &rarr; <b>Add to Home Screen</b> for fullscreen kiosk mode</div>
+
+<script>
+(function(){
+  "use strict";
+  const $ = id => document.getElementById(id);
+  function resolveAppBase(){
+    let path = location.pathname.replace(/\/+$/, '');
+    ['/phone', '/scanner', '/scan', '/tablet'].forEach((suffix) => {
+      if (path.endsWith(suffix)) path = path.slice(0, -suffix.length);
+    });
+    return path === '/' ? '' : path;
+  }
+  const APP_BASE = resolveAppBase();
+  const api = (path) => APP_BASE + path;
+  const scanFrame = $('scan-frame');
+  const scanStatus = $('scan-status');
+  const progressCircle = document.querySelector('.progress-ring circle');
+  const CIRC = 2 * Math.PI * 120;
+  progressCircle.style.strokeDasharray = CIRC;
+
+  // ---- show the "Add to Home Screen" hint only when running as a normal
+  // Safari tab (not already launched from a home-screen icon) ----
+  const isStandalone = window.navigator.standalone === true ||
+                        window.matchMedia('(display-mode: standalone)').matches;
+  if (!isStandalone){
+    $('addhome').hidden = false;
+    setTimeout(() => { $('addhome').hidden = true; }, 12000);
+  }
+
+  // ---- keep the display awake for the whole shift ----
+  let wakeLock = null;
+  async function requestWakeLock(){
+    try {
+      if ('wakeLock' in navigator){
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch(e) { /* not fatal — screen may just dim on unsupported iOS versions */ }
+  }
+  requestWakeLock();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') requestWakeLock();
+  });
+
+  function pad(n){ return String(n).padStart(2,'0'); }
+  setInterval(() => {
+    const d = new Date();
+    $('clock').textContent = pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+  }, 1000);
+
+  // ---- small helper: fetch with a timeout so a flaky booth network never
+  // leaves the scanner stuck showing a stale state ----
+  function fetchWithTimeout(url, opts, ms){
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms || 4000);
+    return fetch(url, Object.assign({}, opts, { signal: controller.signal }))
+      .finally(() => clearTimeout(timer));
+  }
+
+  const SCAN_DURATION = 1500;   // matches FINGERPRINT_HOLD_SECONDS on the booth
+  let awaiting = false, currentSeed = null;
+  // true press-and-hold: prog rises while a thumb is down, drains back when lifted
+  let held = false, prog = 0, raf = null, lastT = 0, done = false;
+  const DRAIN_MS = 1200;   // full -> empty when the thumb is taken away
+
+  // ---- the guest's fingerprint identity mark -------------------------------
+  // There's no real fingerprint sensor here -- this is a tap trigger, not a
+  // biometric reader. So each scan rolls a random seed and reshapes these
+  // rings from it (a tiny seeded PRNG, so it's reproducible); that same seed
+  // rides along in the /trigger POST and the booth app redraws the *exact*
+  // same ring pattern on every later screen and on the portrait card. That's
+  // what makes it read as "their" mark rather than decoration -- see
+  // sardar_photobooth.py's FINGERPRINT IDENTITY section for the other half.
+  function mulberry32(seed){
+    return function(){
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function applyFingerprintPattern(seed){
+    const rand = mulberry32(seed);
+    document.querySelectorAll('.fingerprint circle:not(:first-child)').forEach((circle, i) => {
+      const r = 18 + i * 8;
+      const circumference = 2 * Math.PI * r;
+      const gapFrac = 0.15 + rand() * 0.25;
+      circle.setAttribute('stroke-dasharray',
+        `${(circumference * (1 - gapFrac)).toFixed(1)} ${(circumference * gapFrac).toFixed(1)}`);
+      circle.setAttribute('transform', `rotate(${(rand() * 360).toFixed(1)})`);
+    });
+  }
+
+  // Poll the booth's status so we can disable the scanner while it's mid-flow
+  // with a previous agent, and show a connectivity indicator.
+  async function pollStatus(){
+    try {
+      const res = await fetchWithTimeout(api('/status'), { cache: 'no-store' }, 3000);
+      const data = await res.json();
+      // The scanner is ready directly from the booth's default/IDLE screen.
+      // AWAIT_FINGERPRINT remains accepted for the legacy diagnostic route.
+      const nowAwaiting = (data.state === 'IDLE' || data.state === 'AWAIT_FINGERPRINT');
+      if (nowAwaiting && !awaiting) {
+        // A photo/session just finished (or the operator pressed R): fully
+        // reset the DOM instead of leaving the previous "verified" screen.
+        done = false;
+        held = false;
+        currentSeed = null;
+        setProg(0);
+        scanFrame.classList.remove('scanning', 'disabled');
+        scanStatus.className = 'scan-status';
+        scanStatus.textContent = 'PRESS AND HOLD YOUR THUMB';
+      }
+      awaiting = nowAwaiting;
+      const conn = $('conn');
+      if (awaiting){
+        conn.className = 'online';
+        conn.innerHTML = '<span class="dot"></span>AWAITING THUMB';
+        scanFrame.classList.remove('disabled');
+        if (!held && !done && prog === 0 && scanStatus.className === 'scan-status')
+          scanStatus.textContent = 'PRESS AND HOLD YOUR THUMB';
+      } else {
+        conn.className = 'busy';
+        conn.innerHTML = '<span class="dot"></span>' +
+          'SESSION IN PROGRESS';
+        scanFrame.classList.add('disabled');
+        if (!held && !done) scanStatus.textContent =
+          'STAND BY';
+      }
+    } catch(e){
+      const conn = $('conn');
+      conn.className = 'offline';
+      conn.innerHTML = '<span class="dot"></span>CONNECTION LOST';
+      scanFrame.classList.add('disabled');
+    }
+  }
+  pollStatus();
+  setInterval(pollStatus, 2500);
+
+  function setProg(p){
+    prog = Math.max(0, Math.min(1, p));
+    progressCircle.style.strokeDashoffset = CIRC * (1 - prog);
+  }
+
+  function tick(now){
+    if (!lastT) lastT = now;
+    const dt = now - lastT; lastT = now;
+    setProg(prog + (held ? dt / SCAN_DURATION : -dt / DRAIN_MS));
+
+    if (held && prog >= 1 && !done){ done = true; finishScan(); return; }
+
+    if (held || prog > 0){
+      raf = requestAnimationFrame(tick);
+    } else {
+      // fully drained and released -> idle
+      raf = null; lastT = 0;
+      scanFrame.classList.remove('scanning');
+      if (awaiting && !done) { scanStatus.className = 'scan-status';
+        scanStatus.textContent = 'PRESS AND HOLD YOUR THUMB'; }
+    }
+  }
+
+  function press(e){
+    if (e) e.preventDefault();
+    if (done || !awaiting) return;
+    if (!held && prog === 0){                 // start of a fresh hold -> new mark
+      currentSeed = Math.floor(Math.random() * 2147483647);
+      applyFingerprintPattern(currentSeed);
+    }
+    held = true;
+    scanFrame.classList.add('scanning');
+    scanStatus.className = 'scan-status live';
+    scanStatus.textContent = 'HOLD STILL -- KEEP YOUR THUMB DOWN';
+    if (!raf){ lastT = 0; raf = requestAnimationFrame(tick); }
+  }
+
+  function release(){
+    if (!held) return;
+    held = false;
+    if (!done){
+      scanStatus.className = 'scan-status live';
+      scanStatus.textContent = 'DON\'T LIFT -- HOLD TO VERIFY';
+    }
+  }
+
+  async function finishScan(){
+    setProg(1);
+    scanStatus.textContent = 'SUBJECT IDENTIFIED';
+    scanFrame.classList.remove('scanning');
+
+    try {
+      const res = await fetchWithTimeout(api('/fingerprint'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seed: currentSeed }),
+      }, 4000);
+      if (res.ok){
+        scanStatus.className = 'scan-status ok';
+        scanStatus.textContent = 'IDENTITY VERIFIED -- SEE THE BOOTH SCREEN';
+      } else {
+        const data = await res.json().catch(() => ({}));
+        scanStatus.className = 'scan-status live';
+        scanStatus.textContent = 'NOT READY -- WAIT FOR THE BOOTH';
+      }
+    } catch(e){
+      scanStatus.className = 'scan-status live';
+      scanStatus.textContent = 'CONNECTION ERROR -- CHECK BOOTH LINK';
+    }
+
+    // hold stays full and 'done' until the booth advances and poll() resets us
+  }
+
+  scanFrame.addEventListener('pointerdown', press);
+  window.addEventListener('pointerup', release);
+  window.addEventListener('pointercancel', release);
+  scanFrame.addEventListener('pointerleave', release);
+  scanFrame.addEventListener('contextmenu', (e) => e.preventDefault());
+})();
+</script>
+</body>
+</html>

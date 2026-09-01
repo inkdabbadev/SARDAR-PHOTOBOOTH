@@ -1,0 +1,38 @@
+{
+  "rewrites": [
+    { "source": "/", "destination": "/ipad_trigger.html" },
+    { "source": "/scanner", "destination": "/ipad_trigger.html" },
+    { "source": "/scan", "destination": "/ipad_trigger.html" },
+    { "source": "/tablet", "destination": "/ipad_trigger.html" },
+    { "source": "/phone", "destination": "/phone_call.html" },
+
+    { "source": "/sardar2photo", "destination": "/ipad_trigger.html" },
+    { "source": "/sardar2photo/", "destination": "/ipad_trigger.html" },
+    { "source": "/sardar2photo/scanner", "destination": "/ipad_trigger.html" },
+    { "source": "/sardar2photo/scan", "destination": "/ipad_trigger.html" },
+    { "source": "/sardar2photo/tablet", "destination": "/ipad_trigger.html" },
+    { "source": "/sardar2photo/phone", "destination": "/phone_call.html" },
+
+    { "source": "/sardar2photo/fonts/:path*", "destination": "/fonts/:path*" },
+    { "source": "/sardar2photo/static/:path*", "destination": "/static/:path*" },
+    { "source": "/sardar2photo/sardar-logo.png", "destination": "/sardar-logo.png" },
+    { "source": "/sardar2photo/ringtone.mp3", "destination": "/ringtone.mp3" },
+
+    { "source": "/status", "destination": "/api/proxy?endpoint=status" },
+    { "source": "/fingerprint", "destination": "/api/proxy?endpoint=fingerprint" },
+    { "source": "/delivery-number", "destination": "/api/proxy?endpoint=delivery-number" },
+    { "source": "/pair", "destination": "/api/proxy?endpoint=pair" },
+    { "source": "/answer", "destination": "/api/proxy?endpoint=answer" },
+    { "source": "/audio-done", "destination": "/api/proxy?endpoint=audio-done" },
+    { "source": "/trigger", "destination": "/api/proxy?endpoint=trigger" },
+
+    { "source": "/sardar2photo/status", "destination": "/api/proxy?endpoint=status" },
+    { "source": "/sardar2photo/fingerprint", "destination": "/api/proxy?endpoint=fingerprint" },
+    { "source": "/sardar2photo/delivery-number", "destination": "/api/proxy?endpoint=delivery-number" },
+    { "source": "/sardar2photo/pair", "destination": "/api/proxy?endpoint=pair" },
+    { "source": "/sardar2photo/answer", "destination": "/api/proxy?endpoint=answer" },
+    { "source": "/sardar2photo/audio-done", "destination": "/api/proxy?endpoint=audio-done" },
+    { "source": "/sardar2photo/trigger", "destination": "/api/proxy?endpoint=trigger" }
+  ]
+}
+
